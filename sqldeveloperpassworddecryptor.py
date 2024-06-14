@@ -43,6 +43,7 @@ main_grp = OptionGroup(parser, 'Main parameters')
 main_grp.add_option('-p', '--encrypted-password', help = '(mandatory): password that you want to decrypt. Ex. -p 054D4844D8549C0DB78EE1A98FE4E085B8A484D20A81F7DCF8', nargs = 1)
 main_grp.add_option('-d', '--db-system-id-value', help = '(mandatory from v4): installation-unique value of "db.system.id" attribute in the "product-preferences.xml" file, or the export file encryption key. Ex: -d 6b2f64b2-e83e-49a5-9abf-cb2cd7e3a9ee', nargs = 1)
 main_grp.add_option('-o', '--old', help = '(mandatory between v4 and v19.1) if the password you want to decrypt is for a product version between 4 and 19.1', action = 'store_true', default = False)
+main_grp.add_option('-n', '--new', help = 'if the password you want to decrypt is for a product version >v23', action = 'store_true', default = False)
 #main_grp.add_option('-c', '--connections-file', help = '(optional): "connections.xml" file containing encrypted passwords.', nargs = 1)
 #main_grp.add_option('-f', '--db-system-id-file', help = '(optional): "product-preferences.xml" file  containing the "db.system.id" attribute value.', nargs = 1)
 
@@ -60,6 +61,12 @@ def des_cbc_decrypt(encrypted_password, decryption_key, iv):
     unpad = lambda s : s[:-ord(s[len(s)-1:])]
     crypter = DES.new(decryption_key, DES.MODE_CBC, iv)
     decrypted_password = unpad(crypter.decrypt(encrypted_password))
+    
+    return decrypted_password.decode('utf-8')
+    
+def aes_gcm_decrypt(encrypted_password, decryption_key, nonce):
+    crypter = AES.new(decryption_key, AES.MODE_GCM, nonce=nonce)
+    decrypted_password = crypter.decrypt(encrypted_password[:-16])
     
     return decrypted_password.decode('utf-8')
 
@@ -109,6 +116,22 @@ def decrypt_v19_2(encrypted, db_system_id, parser):
     
     try:
         decrypted = aes_cbc_decrypt(encrypted_password, key, iv)
+    except:
+        parser.error('Error during decryption. Remember, for a v4 -> v19.1 password you need the "-o" option')
+    
+    return decrypted
+
+def decrypt_v23(encrypted, db_system_id, parser):
+    encrypted_password = base64.b64decode(encrypted)
+    
+    salt = array.array('b', [6, -74, 97, 35, 61, 104, 50, -72])
+    key = hashlib.pbkdf2_hmac("sha256", db_system_id.encode(), salt, 5000, 32)
+
+    nonce = encrypted_password[:12]
+    encrypted_password = encrypted_password[12:]
+    
+    try:
+        decrypted = aes_gcm_decrypt(encrypted_password, key, nonce)
     except:
         parser.error('Error during decryption. Remember, for a v4 -> v19.1 password you need the "-o" option')
     
